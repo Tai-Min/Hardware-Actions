@@ -1,8 +1,7 @@
-name: Remove stale branches created by bots
+name: Remove stale branches created by actions
 
 on:
-  schedule:
-    - cron: "0 0 * * *" # Everday at midnight
+  workflow_call:
 
 jobs:
   remove-stale-branches:

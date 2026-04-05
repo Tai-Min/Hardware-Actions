@@ -1,12 +1,13 @@
 name: PR check
 
 on:
-  pull_request_target:
+  workflow_call:
 
 jobs:
   workflows_check:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
 
     steps:
@@ -23,13 +24,13 @@ jobs:
         filters: |
           gh:
             - '.github/**'
-            
+
     - uses: actions/checkout@v4
     
     - name: Committer check
       if: steps.filter.outputs.gh == 'true'
       id: committer_check
-      uses: ./.github/actions/committer_check
+      uses: Tai-Min/Hardware-Actions/.github/actions/committer_check@master
       with:
         repo: ${{ github.repository }}
         pr_number: ${{ github.event.pull_request.number }}

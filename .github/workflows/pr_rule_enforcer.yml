@@ -2,7 +2,7 @@
 name: PR rule enforcer
 
 on:
-  pull_request_target:
+  workflow_call:
 
 env:
   BRANCH_NAME: ${{ github.head_ref }}
@@ -18,15 +18,14 @@ jobs:
     steps:
       - name: Check head branch
         run: |
-          echo "Branch name is: $BRANCH_NAME"
-
           if [[ "$BRANCH_NAME" == repo/*  || 
                 "$BRANCH_NAME" == docs/*  || 
                 "$BRANCH_NAME" == bug/*   ||
                 "$BRANCH_NAME" == devel/* ||
                 "$BRANCH_NAME" == feature/* ]]; then
-            echo "$BRANCH_NAME is allowed to be merged into master"
+            echo "✅ $BRANCH_NAME is allowed to be merged into master"
           else
+            echo "❌ $BRANCH_NAME it not allowed to be merged into master"
             exit 1
           fi
 

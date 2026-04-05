@@ -1,12 +1,11 @@
-name: Label remover
+name: Remove label that triggered the CI
 
 on:
-  pull_request_target:
-    types: [ labeled ]
+  workflow_call:
 
 jobs:
   remove_label:
-    if: ${{ github.event.label.name == 'run_tests' }}
+    if: ${{ inputs.label == 'run_tests' }}
 
     runs-on: ubuntu-latest
     permissions:
