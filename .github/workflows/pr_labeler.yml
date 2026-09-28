@@ -14,7 +14,7 @@ jobs:
     steps:
       - name: Get labeler
         run: |
-          wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/.github/labeler.yml
+          wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/labeler.yml
       - name: Add labels to a topic
         uses: actions/labeler@v6
         with:

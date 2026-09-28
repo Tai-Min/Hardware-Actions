@@ -1,13 +1,21 @@
 name: Create a release draft
+
 on:
-  issue_comment:
-    types: [created]
+  workflow_call:
+    inputs:
+      comment_id:
+        required: true
+        type: string
+      comment_body:
+        required: true
+        type: string
+      issue_number:
+        required: true
+        type: string
+
 
 jobs:
   check_author:
-    if: >
-      github.event.issue.pull_request == null &&
-      startsWith(github.event.comment.body, '/release')
     runs-on: ubuntu-22.04
     outputs:
       association: ${{ steps.author_check.outputs.association }}
@@ -17,8 +25,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          AUTHOR_ASSOCIATION=$(gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }} | jq .author_association)
-          echo "${{ github.event.comment.body }}"
+          AUTHOR_ASSOCIATION=$(gh api repos/${{ github.repository }}/issues/comments/${{ inputs.comment_id }} | jq .author_association)
+          echo "${{ inputs.comment_body }}"
           echo "$AUTHOR_ASSOCIATION"
           echo "association=$AUTHOR_ASSOCIATION" >> $GITHUB_OUTPUT
 
@@ -37,7 +45,7 @@ jobs:
         run: |
           # TODO: get issue comment from inputs
 
-          BODY=$(gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }} | jq .body)
+          BODY=$(gh api repos/${{ github.repository }}/issues/comments/${{ inputs.comment_id }} | jq .body)
           BODY=$(echo "$BODY" | awk '{sub("/release","");print}')
           BODY=$(echo ${BODY:1:-1})
           echo "$BODY"
@@ -52,7 +60,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           #TODO: get issue from inputs
-          COMMENT=$(gh api repos/${{ github.repository }}/issues/${{ github.event.issue.number }} | jq .body)
+          COMMENT=$(gh api repos/${{ github.repository }}/issues/${{ inputs.issue_number }} | jq .body)
           NAME=$(echo "$COMMENT" | grep -oP '(?<=<!-- name:)[^ ]+(?= -->)')
           SHA=$(echo "$COMMENT" | grep -oP '(?<=<!-- sha:)[^ ]+(?= -->)')
           RUN_ID=$(echo "$COMMENT" | grep -oP '(?<=<!-- run_id:)[^ ]+(?= -->)')
@@ -115,7 +123,7 @@ jobs:
             Release created: [${{ steps.author_comment.outputs.name }}](${{ steps.create_release.outputs.html_url }})
             `;
             await github.rest.issues.createComment({
-              issue_number: ${{ github.event.issue.number }},
+              issue_number: ${{ inputs.issue_number }},
               owner: context.repo.owner,
               repo: context.repo.repo,
               body
