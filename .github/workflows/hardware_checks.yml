@@ -192,7 +192,8 @@ jobs:
 
             RESULT="${RESULT}\n- ${FILE}: $REPORT\n$OUT"
 
-            python3 ./Board2Pdf/src/board2pdf/cli.py $FILE --colorize pymupdf --ini ./hw/board2pdf.config.ini
+            wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/board2pdf.config.ini
+            python3 ./Board2Pdf/src/board2pdf/cli.py $FILE --colorize pymupdf --ini ./board2pdf.config.ini
 
             PCB_DIR=$(dirname $FILE)
             mkdir -p "./pcb/$PCB_DIR"
