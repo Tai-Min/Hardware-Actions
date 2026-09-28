@@ -28,8 +28,6 @@ jobs:
 
       - name: Install requirements
         run: |
-          wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/ISSUE_HW_RELEASE_SUCCESS.md
-          wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/ISSUE_HW_RELEASE_FAIL.md
           wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/board2pdf.config.ini
 
           sudo add-apt-repository -y ppa:kicad/kicad-9.0-releases
@@ -84,6 +82,11 @@ jobs:
           if-no-files-found: error
 
       - uses: actions/checkout@v4
+
+      - name: Get issue templates
+        run: |
+          wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/ISSUE_HW_RELEASE_SUCCESS.md
+          wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/ISSUE_HW_RELEASE_FAIL.md
 
       - uses: JasonEtco/create-an-issue@v2
         if: success()
