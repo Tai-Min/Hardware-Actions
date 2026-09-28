@@ -5,12 +5,15 @@ on:
       name:
         description: Name of the hardware release
         required: true
+        type: string
       sha:
         description: Commit sha
         required: true
+        type: string
       projects:
         description: Comma separated project names
         required: true
+        type: string
 
 jobs:
   release_creator:
