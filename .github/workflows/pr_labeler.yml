@@ -12,5 +12,10 @@ jobs:
       issues: write
     runs-on: ubuntu-latest
     steps:
+      - name: Get labeler
+        run: |
+          wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/.github/labeler.yml
       - name: Add labels to a topic
         uses: actions/labeler@v6
+        with:
+          configuration-path: ./labeler.yml
