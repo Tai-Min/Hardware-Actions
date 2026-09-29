@@ -162,7 +162,7 @@ jobs:
           mapfile -d '' -t SCHEMATIC_IMAGES < <(find ./schematics -maxdepth 1 -type f -printf '%f\0')
           for IMAGE in "${SCHEMATIC_IMAGES[@]}"; do
             SCHEMATICS+=$'\n- '"$IMAGE"
-            SCHEMATICS+=$'\n![KiCad schematic](https://raw.githubusercontent.com/'"$BASE_REPOSITORY/$AUTO_BRANCH/schematics/$IMAGE)"
+            SCHEMATICS+=$'\n![KiCad schematic](https://github.com/'"$BASE_REPOSITORY/raw/$AUTO_BRANCH/schematics/$IMAGE)"
           done
 
           printf '%s\n' "$SCHEMATICS"
@@ -227,7 +227,7 @@ jobs:
               sed -i '0,/<\/defs>/{s/<\/defs>/<\/defs><rect width="100%" height="100%" fill="white"\/>/}' "$SVG"
 
               PCB+=$'\n- '"$SVG"
-              PCB+=$'\n![KiCad PCB](https://raw.githubusercontent.com/'"$BASE_REPOSITORY/$AUTO_BRANCH/$SVG)"
+              PCB+=$'\n![KiCad PCB](https://github.com/'"$BASE_REPOSITORY/raw/$AUTO_BRANCH/$SVG)"
             done
           done
 
