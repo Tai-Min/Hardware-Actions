@@ -22,4 +22,4 @@ jobs:
       - name: Remove run_tests label
         uses: actions-ecosystem/action-remove-labels@v1
         with:
-          labels: $EXPECTED_LABEL
+          labels: ${{ $EXPECTED_LABEL }}
