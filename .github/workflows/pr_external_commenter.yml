@@ -1,5 +1,4 @@
-# Works only for forked PRs as it's not needed for collaborators
-name: Update PR comments
+name: Update PR comments from forks
 
 on:
   workflow_call:
@@ -8,6 +7,7 @@ jobs:
   pr_updater:
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       pull-requests: write
     steps:
       - name: Find associated pull request
@@ -30,6 +30,7 @@ jobs:
 
       - name: Committer check
         id: committer_check
+        if: steps.pr.outputs.result != ''
         uses: Tai-Min/Hardware-Actions/.github/actions/committer_check@master
         with:
           repo: ${{ github.repository }}
@@ -37,24 +38,23 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Delete previous comment
-        if: steps.committer_check.outputs.association == 'false'
-        uses: ./.github/actions/comment_remover@master
+        if: steps.pr.outputs.result != '' && steps.committer_check.outputs.association == 'false'
+        uses: Tai-Min/Hardware-Actions/.github/actions/comment_remover@master
         with:
           pr_number: ${{ steps.pr.outputs.result }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          magic_header: "\n<!-- TEST_RUNNER -->"
+          magic_header: "<!-- TEST_RUNNER -->"
 
       - name: Post a comment
-        if: steps.committer_check.outputs.association == 'false'
+        if: steps.pr.outputs.result != '' && steps.committer_check.outputs.association == 'false'
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
           MSG_ARTIFACT_NAME: "pr_message"
-
         run: |
           export GITHUB_API="https://api.github.com/repos/$GITHUB_REPOSITORY"
 
           crl() {
-            curl --silent --show-error --location --retry 1 "${@:2}" \
+            curl --fail --silent --show-error --location --retry 1 "${@:2}" \
               -H "Accept: application/vnd.github.antiope-preview+json, application/vnd.github.v3+json" \
              "$1"
           }
@@ -65,7 +65,10 @@ jobs:
 
           RUN_ID="${{ github.event.workflow_run.id }}"
           PR_NUMBER="${{ steps.pr.outputs.result }}"
-          ARTIFACTS="$(crl "$GITHUB_API/actions/runs/$RUN_ID/artifacts")"
+          if ! ARTIFACTS="$(auth_crl "$GITHUB_API/actions/runs/$RUN_ID/artifacts")"; then
+            echo "Unable to list artifacts in workflow $RUN_ID (PR #$PR_NUMBER), skipping..."
+            exit 0
+          fi
 
           ARTIFACT_URL="$(jq -r --arg MSG_ARTIFACT_NAME "$MSG_ARTIFACT_NAME" '
             .artifacts
@@ -80,7 +83,13 @@ jobs:
             exit 0
           fi
 
-          if ! MESSAGE="$(auth_crl "$ARTIFACT_URL" | gunzip)"; then
+          ARTIFACT_ARCHIVE="$(mktemp)"
+          trap 'rm -f "$ARTIFACT_ARCHIVE"' EXIT
+          if ! auth_crl "$ARTIFACT_URL" --output "$ARTIFACT_ARCHIVE"; then
+            echo "Unable to download artifact '$MSG_ARTIFACT_NAME' in workflow $RUN_ID (PR #$PR_NUMBER), skipping..."
+            exit 0
+          fi
+          if ! MESSAGE="$(unzip -p "$ARTIFACT_ARCHIVE")"; then
             echo "Unable to download or parse message from artifact '$MSG_ARTIFACT_NAME' in workflow $RUN_ID (PR #$PR_NUMBER), skipping..."
             exit 0
           fi

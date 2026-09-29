@@ -1,4 +1,3 @@
-# Label PRs based on rules in labeler.yml
 name: PR Labeler
 
 on:

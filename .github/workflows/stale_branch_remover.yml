@@ -6,10 +6,10 @@ on:
 jobs:
   remove-stale-branches:
     runs-on: ubuntu-latest
-
     steps:
       - name: Remove stale branches created by bots
         uses: fpicalausa/remove-stale-branches@v2.4.0
         with:
           dry-run: false
           restrict-branches-regex: ^.*-AUTO$
+          ignore-branches-with-open-prs: true

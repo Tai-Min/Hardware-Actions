@@ -5,29 +5,34 @@ on:
     inputs:
       comment_id:
         required: true
-        type: string
+        type: number
       comment_body:
         required: true
         type: string
       issue_number:
         required: true
-        type: string
-
+        type: number
+      is_pull_request:
+        required: true
+        type: boolean
 
 jobs:
   check_author:
     runs-on: ubuntu-22.04
+    if: >
+      inputs.is_pull_request == false &&
+      (inputs.comment_body == '/release' || startsWith(inputs.comment_body, '/release '))
+    permissions:
+      issues: read
     outputs:
       association: ${{ steps.author_check.outputs.association }}
     steps:
       - name: Get author of the comment
         id: author_check
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           AUTHOR_ASSOCIATION=$(gh api repos/${{ github.repository }}/issues/comments/${{ inputs.comment_id }} | jq .author_association)
-          echo "${{ inputs.comment_body }}"
-          echo "$AUTHOR_ASSOCIATION"
           echo "association=$AUTHOR_ASSOCIATION" >> $GITHUB_OUTPUT
 
   release_publisher:
@@ -35,29 +40,34 @@ jobs:
     runs-on: ubuntu-22.04
     needs: check_author
     permissions:
-      issues: write
+      actions: read
       contents: write
+      issues: write
     steps:
       - name: Get release description
         id: release_body
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           # TODO: get issue comment from inputs
 
-          BODY=$(gh api repos/${{ github.repository }}/issues/comments/${{ inputs.comment_id }} | jq .body)
-          BODY=$(echo "$BODY" | awk '{sub("/release","");print}')
-          BODY=$(echo ${BODY:1:-1})
-          echo "$BODY"
-
-          echo "body<<EOF" >> $GITHUB_OUTPUT
-          echo -e "$BODY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          BODY="$(gh api repos/${{ github.repository }}/issues/comments/${{ inputs.comment_id }} | jq -r .body)"
+          BODY="${BODY#/release}"
+          BODY="${BODY# }"
+          DELIMITER="$(cat /proc/sys/kernel/random/uuid)"
+          while [[ "$BODY" == *"$DELIMITER"* ]]; do
+            DELIMITER="$(cat /proc/sys/kernel/random/uuid)"
+          done
+          {
+            printf 'body<<%s\n' "$DELIMITER"
+            printf '%s\n' "$BODY"
+            printf '%s\n' "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Get author comment variables
         id: author_comment
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           #TODO: get issue from inputs
           COMMENT=$(gh api repos/${{ github.repository }}/issues/${{ inputs.issue_number }} | jq .body)
@@ -82,7 +92,7 @@ jobs:
       - uses: actions/download-artifact@v5
         id: download_artifacts
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           run-id: ${{ steps.author_comment.outputs.run_id }}
           path: ./release
 
@@ -90,7 +100,7 @@ jobs:
         id: create_release
         uses: comnoco/create-release-action@v2.0.5
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           tag_name: ${{ steps.author_comment.outputs.name }}
           release_name: ${{ steps.author_comment.outputs.name }}
@@ -108,7 +118,7 @@ jobs:
         id: upload_release_asset 
         uses: actions/upload-release-asset@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ${{ steps.download_artifacts.outputs.download-path }}/release.zip
@@ -117,11 +127,14 @@ jobs:
 
       - name: Post comment with results
         uses: actions/github-script@v7
+        env:
+          RELEASE_NAME: ${{ steps.author_comment.outputs.name }}
+          RELEASE_URL: ${{ steps.create_release.outputs.html_url }}
         with:
           script: |
-            const body = `
-            Release created: [${{ steps.author_comment.outputs.name }}](${{ steps.create_release.outputs.html_url }})
-            `;
+            const releaseName = process.env.RELEASE_NAME;
+            const releaseUrl = process.env.RELEASE_URL;
+            const body = `Release created: [${releaseName}](${releaseUrl})`;
             await github.rest.issues.createComment({
               issue_number: ${{ inputs.issue_number }},
               owner: context.repo.owner,

@@ -26,6 +26,12 @@ jobs:
         with:
           ref: ${{ inputs.sha }}
 
+      - name: Get issue templates
+        if: always()
+        run: |
+          wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/ISSUE_HW_RELEASE_SUCCESS.md
+          wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/ISSUE_HW_RELEASE_FAIL.md
+
       - name: Install requirements
         run: |
           wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/board2pdf.config.ini
@@ -45,13 +51,21 @@ jobs:
           git clone https://github.com/bennymeg/Fabrication-Toolkit.git
 
       - name: Create release files
+        env:
+          PROJECTS: ${{ inputs.projects }}
         run: |
-          PROJECTS=${{ inputs.projects }}
+          if [[ ! "$PROJECTS" =~ ^[[:space:]]*[A-Za-z0-9][A-Za-z0-9_-]*([[:space:]]*,[[:space:]]*[A-Za-z0-9][A-Za-z0-9_-]*)*[[:space:]]*$ ]]; then
+            echo "Invalid projects input: use comma-separated project names containing only letters, digits, underscores, or hyphens." >&2
+            exit 1
+          fi
+
+          IFS=',' read -r -a PROJECT_LIST <<< "$PROJECTS"
           HW_PATH="./hw"
 
           mkdir release
 
-          for PROJECT in ${PROJECTS//,/ }; do
+          for PROJECT in "${PROJECT_LIST[@]}"; do
+            PROJECT="${PROJECT//[[:space:]]/}"
             echo "$PROJECT"
             mkdir "$HW_PATH/$PROJECT/report"
             mkdir "$HW_PATH/$PROJECT/plots"
@@ -66,9 +80,9 @@ jobs:
 
             python3 ./Board2Pdf/src/board2pdf/cli.py "$HW_PATH/$PROJECT/$PROJECT.kicad_pcb" --colorize pymupdf --ini "./board2pdf.config.ini"
 
-            $(cd Fabrication-Toolkit && python3 -m plugins.cli -p ../$HW_PATH/$PROJECT/$PROJECT.kicad_pcb --noBackup --nonInteractive)
+            (cd Fabrication-Toolkit && python3 -m plugins.cli -p "../$HW_PATH/$PROJECT/$PROJECT.kicad_pcb" --noBackup --nonInteractive)
 
-            cp -r $HW_PATH/$PROJECT/ release
+            cp -r "$HW_PATH/$PROJECT/" release
           done
 
           find release -name '*.svg' -type f -delete
@@ -80,13 +94,6 @@ jobs:
           name: hardware
           path: ./release
           if-no-files-found: error
-
-      - uses: actions/checkout@v4
-
-      - name: Get issue templates
-        run: |
-          wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/ISSUE_HW_RELEASE_SUCCESS.md
-          wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/ISSUE_HW_RELEASE_FAIL.md
 
       - uses: JasonEtco/create-an-issue@v2
         if: success()

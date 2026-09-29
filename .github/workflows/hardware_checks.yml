@@ -35,12 +35,13 @@ jobs:
           ref: ${{ inputs.head_ref }}
           repository: ${{ inputs.repo_name }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Check if schematics or pcbs were changed
         uses: dorny/paths-filter@v3
         id: filter
         with:
-          list-files: shell
+          list-files: json
           filters: |
             schematics:
               - added|modified: '**/*.kicad_sch'
@@ -74,6 +75,7 @@ jobs:
           ref: ${{ inputs.head_ref }}
           repository: ${{ inputs.repo_name }}
           fetch-depth: 0
+          persist-credentials: false
           
       - name: Install KiCad
         run: |
@@ -99,22 +101,28 @@ jobs:
       - name: Check schematics
         id: check_schematics
         if: needs.filter.outputs.schematics == 'true'
+        env:
+          SCHEMATICS_FILES_JSON: ${{ needs.filter.outputs.schematics_files }}
+          COMMITTER_ASSOCIATION: ${{ steps.committer_check.outputs.association }}
+          BASE_REPOSITORY: ${{ github.repository }}
         run: |
           mkdir -p erc
           mkdir -p schematics
 
-          FILES="${{ needs.filter.outputs.schematics_files }}"
-          FILES=$(echo "$FILES" | tr ' ' '\n')
-
-          echo "$FILES"
+          mapfile -d '' -t FILES < <(jq -j '.[] | ., "\u0000"' <<< "$SCHEMATICS_FILES_JSON")
+          printf '%s\n' "${FILES[@]}"
+          if (( ${#FILES[@]} == 0 )); then
+            echo "No schematic files were returned by the filter" >&2
+            exit 1
+          fi
 
           # Ignore CvPcb warning on fresh install
-          FIRST_FILE=$(echo "$FILES" | head -n 1)
+          FIRST_FILE="${FILES[0]}"
           echo "$FIRST_FILE"
           kicad-cli sch erc "$FIRST_FILE" --output "./result.rpt"
 
           RESULT=""
-          for FILE in $FILES; do
+          for FILE in "${FILES[@]}"; do
             # Ignore hierarchical schematics
             LAST_DIR="$(basename "$(dirname "$FILE")")"
             FILENAME="$(basename "$FILE")"
@@ -123,54 +131,68 @@ jobs:
               continue
             fi
 
+            mkdir -p "./erc/$(dirname "$FILE")"
             OUT=$(kicad-cli sch erc "$FILE" --output "./erc/$FILE.rpt")
             OUT=$(echo "$OUT" | head -n 1)
 
             REPORT=""
-            if [[ ${{ steps.committer_check.outputs.association }} = 'true' ]]; then
+            if [[ "$COMMITTER_ASSOCIATION" == 'true' ]]; then
               REPORT="[report](https://github.com/${{ github.repository }}/blob/$AUTO_BRANCH/erc/$FILE.rpt)"
             else
               REPORT="Report not available"
             fi
 
-            RESULT="${RESULT}\n- ${FILE}: $REPORT\n$OUT"
+            RESULT+=$'\n- '"${FILE}: $REPORT"$'\n'"$OUT"
 
             kicad-cli sch export svg "$FILE" --output "./schematics"
           done
 
-          echo -e "$RESULT"
+          printf '%s\n' "$RESULT"
 
-          echo "result<<EOF" >> $GITHUB_OUTPUT
-          echo -e "$RESULT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          DELIMITER="$(uuidgen)"
+          {
+            echo "result<<$DELIMITER"
+            printf '%s\n' "$RESULT"
+            echo "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
 
-          echo -e "$RESULT" > ./results/erc.txt
+          printf '%s\n' "$RESULT" > ./results/erc.txt
 
           SCHEMATICS=""
-          for i in $(ls ./schematics); do 
-            SCHEMATICS="${SCHEMATICS}\n- $i"
-            SCHEMATICS="${SCHEMATICS}\n![KiCad schematic](https://raw.githubusercontent.com/${{ github.repository }}/$AUTO_BRANCH/schematics/$i)"
+          mapfile -d '' -t SCHEMATIC_IMAGES < <(find ./schematics -maxdepth 1 -type f -printf '%f\0')
+          for IMAGE in "${SCHEMATIC_IMAGES[@]}"; do
+            SCHEMATICS+=$'\n- '"$IMAGE"
+            SCHEMATICS+=$'\n![KiCad schematic](https://raw.githubusercontent.com/'"$BASE_REPOSITORY/$AUTO_BRANCH/schematics/$IMAGE)"
           done
 
-          echo -e "$SCHEMATICS"
+          printf '%s\n' "$SCHEMATICS"
 
-          echo "schematics<<EOF" >> $GITHUB_OUTPUT
-          echo -e "$SCHEMATICS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          DELIMITER="$(uuidgen)"
+          {
+            echo "schematics<<$DELIMITER"
+            printf '%s\n' "$SCHEMATICS"
+            echo "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
 
           exit 0
 
       - name: Check PCB
         id: check_pcb
         if: needs.filter.outputs.pcb == 'true'
+        env:
+          PCB_FILES_JSON: ${{ needs.filter.outputs.pcb_files }}
+          COMMITTER_ASSOCIATION: ${{ steps.committer_check.outputs.association }}
+          BASE_REPOSITORY: ${{ github.repository }}
         run: |
           mkdir -p drc
           mkdir -p pcb
 
-          FILES="${{ needs.filter.outputs.pcb_files }}"
-          FILES=$(echo "$FILES" | tr ' ' '\n')
-
-          echo "$FILES"
+          mapfile -d '' -t FILES < <(jq -j '.[] | ., "\u0000"' <<< "$PCB_FILES_JSON")
+          printf '%s\n' "${FILES[@]}"
+          if (( ${#FILES[@]} == 0 )); then
+            echo "No PCB files were returned by the filter" >&2
+            exit 1
+          fi
 
           python -m pip install PyMuPDF==1.24.13
           python -m pip install --upgrade pdfCropMargins
@@ -178,51 +200,58 @@ jobs:
 
           RESULT=""
           PCB=""
-          for FILE in $FILES; do
+          for FILE in "${FILES[@]}"; do
             echo "$FILE"
+            mkdir -p "./drc/$(dirname "$FILE")"
             OUT=$(kicad-cli pcb drc "$FILE" --output "./drc/$FILE.rpt" --schematic-parity)
             OUT=$(echo "$OUT" | head -n 3)
 
             REPORT=""
-            if [[ ${{ steps.committer_check.outputs.association }} = 'true' ]]; then
+            if [[ "$COMMITTER_ASSOCIATION" == 'true' ]]; then
               REPORT="[report](https://github.com/${{ github.repository }}/blob/$AUTO_BRANCH/drc/$FILE.rpt)"
             else
               REPORT="Report not available"
             fi
 
-            RESULT="${RESULT}\n- ${FILE}: $REPORT\n$OUT"
+            RESULT+=$'\n- '"${FILE}: $REPORT"$'\n'"$OUT"
 
             wget https://raw.githubusercontent.com/Tai-Min/Hardware-Actions/refs/heads/master/helpers/board2pdf.config.ini
-            python3 ./Board2Pdf/src/board2pdf/cli.py $FILE --colorize pymupdf --ini ./board2pdf.config.ini
+            python3 ./Board2Pdf/src/board2pdf/cli.py "$FILE" --colorize pymupdf --ini ./board2pdf.config.ini
 
-            PCB_DIR=$(dirname $FILE)
+            PCB_DIR=$(dirname "$FILE")
             mkdir -p "./pcb/$PCB_DIR"
             mv "$PCB_DIR/plots" "./pcb/$PCB_DIR/"
 
             for SVG in "./pcb/$PCB_DIR"/plots/*.svg; do
               # Add white background
-              sed -i '0,/<\/defs>/{s/<\/defs>/<\/defs><rect width="100%" height="100%" fill="white"\/>/}' $SVG
+              sed -i '0,/<\/defs>/{s/<\/defs>/<\/defs><rect width="100%" height="100%" fill="white"\/>/}' "$SVG"
 
-              PCB="${PCB}\n- $SVG"
-              PCB="${PCB}\n![KiCad PCB](https://raw.githubusercontent.com/${{ github.repository }}/$AUTO_BRANCH/$SVG)"
+              PCB+=$'\n- '"$SVG"
+              PCB+=$'\n![KiCad PCB](https://raw.githubusercontent.com/'"$BASE_REPOSITORY/$AUTO_BRANCH/$SVG)"
             done
           done
 
           rm -r Board2Pdf
 
-          echo -e "$RESULT"
+          printf '%s\n' "$RESULT"
 
-          echo "result<<EOF" >> $GITHUB_OUTPUT
-          echo -e "$RESULT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          DELIMITER="$(uuidgen)"
+          {
+            echo "result<<$DELIMITER"
+            printf '%s\n' "$RESULT"
+            echo "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
 
-          echo -e "$RESULT" > ./results/drc.txt
+          printf '%s\n' "$RESULT" > ./results/drc.txt
 
-          echo "$PCB"
+          printf '%s\n' "$PCB"
 
-          echo "pcb<<EOF" >> $GITHUB_OUTPUT
-          echo -e "$PCB" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          DELIMITER="$(uuidgen)"
+          {
+            echo "pcb<<$DELIMITER"
+            printf '%s\n' "$PCB"
+            echo "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
 
           exit 0
 
@@ -242,55 +271,70 @@ jobs:
         if: steps.committer_check.outputs.association == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_REPOSITORY: ${{ github.repository }}
         run: |
-          gh pr checkout ${{ github.event.pull_request.number }}
+          gh auth setup-git
+          git remote set-url origin "https://github.com/$BASE_REPOSITORY.git"
           git config --global user.email "bot@bots.robobus"
           git config --global user.name "BOT"
-          git branch $AUTO_BRANCH
-          git checkout $AUTO_BRANCH
-          git add .
-          git commit -m "AUTO: Update reports" -s
-          git push origin $AUTO_BRANCH -f
+          for directory in erc schematics drc pcb results; do
+            if [[ -d "$directory" ]]; then
+              git add -A -- "$directory"
+            fi
+          done
+          if ! git diff --cached --quiet; then
+            git commit -m "AUTO: Update reports" -s
+          fi
+          git push origin "HEAD:refs/heads/$AUTO_BRANCH" --force
 
       - name: Create markdown for results comment
         id: comment
+        env:
+          COMMITTER_ASSOCIATION: ${{ steps.committer_check.outputs.association }}
+          SCHEMATICS_RESULT: ${{ steps.check_schematics.outputs.result }}
+          SCHEMATICS_IMAGES: ${{ steps.check_schematics.outputs.schematics }}
+          PCB_RESULT: ${{ steps.check_pcb.outputs.result }}
+          PCB_IMAGES: ${{ steps.check_pcb.outputs.pcb }}
         run: |
           COMMENT=""
-          if [[ ${{ steps.committer_check.outputs.association }} = 'true' ]]; then
-            if [[ -n "${{ steps.check_schematics.outputs.result }}" ]]; then
+          if [[ "$COMMITTER_ASSOCIATION" == 'true' ]]; then
+            if [[ -n "$SCHEMATICS_RESULT" ]]; then
               COMMENT="### Schematics ERC results:"
-              COMMENT="${COMMENT}\n${{ steps.check_schematics.outputs.result }}"
+              COMMENT+=$'\n'"$SCHEMATICS_RESULT"
             fi
 
-            if [[ -n "${{ steps.check_schematics.outputs.schematics }}" ]]; then
-              COMMENT="${COMMENT}\n### Schematics:"
-              COMMENT="${COMMENT}\n${{ steps.check_schematics.outputs.schematics }}"
+            if [[ -n "$SCHEMATICS_IMAGES" ]]; then
+              COMMENT+=$'\n### Schematics:'
+              COMMENT+=$'\n'"$SCHEMATICS_IMAGES"
             fi
 
-            if [[ -n "${{ steps.check_pcb.outputs.result }}" ]]; then
-              COMMENT="${COMMENT}\n### PCB DRC results:"
-              COMMENT="${COMMENT}\n${{ steps.check_pcb.outputs.result }}"
+            if [[ -n "$PCB_RESULT" ]]; then
+              COMMENT+=$'\n### PCB DRC results:'
+              COMMENT+=$'\n'"$PCB_RESULT"
             fi
 
-            if [[ -n "${{ steps.check_pcb.outputs.pcb }}" ]]; then
-              COMMENT="${COMMENT}\n### PCB:"
-              COMMENT="${COMMENT}\n${{ steps.check_pcb.outputs.pcb }}"
+            if [[ -n "$PCB_IMAGES" ]]; then
+              COMMENT+=$'\n### PCB:'
+              COMMENT+=$'\n'"$PCB_IMAGES"
             fi
           else
-            if [[ -n "${{ steps.check_schematics.outputs.result }}" ]]; then
+            if [[ -n "$SCHEMATICS_RESULT" ]]; then
               COMMENT="### Schematics ERC results:"
-              COMMENT="${COMMENT}\n${{ steps.check_schematics.outputs.result }}"
+              COMMENT+=$'\n'"$SCHEMATICS_RESULT"
             fi
 
-            if [[ -n "${{ steps.check_pcb.outputs.result }}" ]]; then
-              COMMENT="${COMMENT}\n### PCB DRC results:"
-              COMMENT="${COMMENT}\n${{ steps.check_pcb.outputs.result }}\n"
+            if [[ -n "$PCB_RESULT" ]]; then
+              COMMENT+=$'\n### PCB DRC results:'
+              COMMENT+=$'\n'"$PCB_RESULT"$'\n'
             fi
           fi
 
-          echo "comment<<EOF" >> $GITHUB_OUTPUT
-          echo -e "$COMMENT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          DELIMITER="$(uuidgen)"
+          {
+            echo "comment<<$DELIMITER"
+            printf '%s\n' "$COMMENT"
+            echo "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
 
   handle_skipped:
     needs: filter

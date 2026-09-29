@@ -1,11 +1,7 @@
-# Check PR if all committing rules are being followed
 name: PR rule enforcer
 
 on:
   workflow_call:
-
-env:
-  BRANCH_NAME: ${{ github.head_ref }}
 
 jobs:
   # Head branch must start with predefinied prefix
@@ -17,6 +13,8 @@ jobs:
 
     steps:
       - name: Check head branch
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
         run: |
           if [[ "$BRANCH_NAME" == repo/*  || 
                 "$BRANCH_NAME" == docs/*  || 
@@ -54,45 +52,49 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{github.event.pull_request.head.ref}}
+          ref: ${{ github.event.pull_request.head.sha }}
           repository: ${{github.event.pull_request.head.repo.full_name}}
           fetch-depth: 0
 
       - name: Check commit sign-offs
         id: check
+        env:
+          BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          git remote add original -f https://github.com/${{ github.event.pull_request.base.repo.full_name }}.git
-          COMMITS=$(git log original/${{ github.base_ref }}..origin/${{ github.event.pull_request.head.ref }} --pretty=format:"%H")
-          echo "Base ref: origin/${{ github.base_ref }}"
+          git remote add original "https://github.com/${BASE_REPOSITORY}.git"
+          git fetch original "refs/heads/${BASE_REF}"
+          COMMITS=$(git rev-list --reverse "$BASE_SHA..$HEAD_SHA")
+          echo "Base ref: $BASE_REF ($BASE_SHA)"
           echo "$COMMITS"
-          UNSIGNED=""
+          UNSIGNED='[]'
           for COMMIT in $COMMITS; do
-            if ! git show -s --format=%B $COMMIT | grep -q "Signed-off-by:"; then
-              AUTHOR=$(git show -s --format=%an $COMMIT)
-              UNSIGNED="${UNSIGNED}\n- ${COMMIT} by ${AUTHOR}"
+            if ! git show -s --format=%B "$COMMIT" | git interpret-trailers --parse | grep -Eq '^Signed-off-by: .+ <[^<>]+>$'; then
+              AUTHOR=$(git show -s --format=%an "$COMMIT")
+              UNSIGNED=$(jq -cn --argjson commits "$UNSIGNED" --arg commit "$COMMIT" --arg author "$AUTHOR" '$commits + [{commit: $commit, author: $author}]')
             fi
           done
-          if [ -n "$UNSIGNED" ]; then
+          if [ "$UNSIGNED" != '[]' ]; then
             echo "❌ Found unsigned commits:"
-            echo -e "$UNSIGNED"
-            echo "unsigned<<EOF" >> $GITHUB_OUTPUT
-            echo -e "$UNSIGNED" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+            echo "$UNSIGNED"
+            echo "unsigned=$UNSIGNED" >> "$GITHUB_OUTPUT"
             exit 1
           else
             echo "✅ All commits are signed off."
           fi
 
       - name: Post comment if unsigned commits found
-        if: failure()
+        if: failure() && steps.check.outputs.unsigned != ''
         uses: actions/github-script@v7
+        env:
+          UNSIGNED_COMMITS: ${{ steps.check.outputs.unsigned }}
         with:
           script: |
-            const body = `
-            ⚠️ Some commits in this PR are missing a "Signed-off-by" line.
-            Unsigned commits:
-            ${{ steps.check.outputs.unsigned }}
-            `;
+            const commits = JSON.parse(process.env.UNSIGNED_COMMITS || "[]");
+            const details = commits.map(({ commit, author }) => `- ${commit} by ${author}`).join("\n");
+            const body = `⚠️ Some commits in this PR are missing a "Signed-off-by" line.\nUnsigned commits:\n${details}`;
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,

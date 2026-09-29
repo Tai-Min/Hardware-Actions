@@ -7,9 +7,12 @@ on:
         required: true
         type: string
 
+env:
+  EXPECTED_LABEL: run_tests
+
 jobs:
   remove_label:
-    if: ${{ inputs.label == 'run_tests' }}
+    if: ${{ inputs.label == $EXPECTED_LABEL }}
 
     runs-on: ubuntu-latest
     permissions:
@@ -19,4 +22,4 @@ jobs:
       - name: Remove run_tests label
         uses: actions-ecosystem/action-remove-labels@v1
         with:
-          labels: run_tests
+          labels: $EXPECTED_LABEL
