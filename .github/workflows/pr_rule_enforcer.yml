@@ -94,10 +94,18 @@ jobs:
           script: |
             const commits = JSON.parse(process.env.UNSIGNED_COMMITS || "[]");
             const details = commits.map(({ commit, author }) => `- ${commit} by ${author}`).join("\n");
-            const body = `⚠️ Some commits in this PR are missing a "Signed-off-by" line.\nUnsigned commits:\n${details}`;
+            const body = `<!-- SIGNOFF_CHECK -->\n⚠️ Some commits in this PR are missing a "Signed-off-by" line.\nUnsigned commits:\n${details}`;
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body
             });
+
+      - name: Remove previous sign-off warnings
+        if: success()
+        uses: Tai-Min/Hardware-Actions/.github/actions/comment_remover@master
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
+          repo_token: ${{ github.token }}
+          magic_header: '<!-- SIGNOFF_CHECK -->'

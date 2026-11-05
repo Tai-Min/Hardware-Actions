@@ -1,0 +1,126 @@
+name: Update PR comments
+
+on:
+  workflow_call:
+    inputs:
+      run_id:
+        description: Workflow run containing the PR message artifact
+        required: true
+        type: string
+      artifact_name:
+        description: Name of the artifact containing the comment body
+        required: false
+        type: string
+        default: pr_message
+      magic_header:
+        description: Marker used to remove the previous generated comment
+        required: false
+        type: string
+        default: "<!-- TEST_RUNNER -->"
+    secrets:
+      github_token:
+        description: Token with actions:read and pull-requests:write permissions
+        required: true
+
+jobs:
+  pr_updater:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Find associated pull request
+        id: pr
+        uses: actions/github-script@v7
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+        with:
+          github-token: ${{ secrets.github_token }}
+          script: |
+            const run = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: Number(process.env.RUN_ID),
+            })
+            const response = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} is:pr sha:${run.data.head_sha}`,
+              per_page: 1,
+            })
+            const pullRequestNumber = response.data.items[0]?.number
+            if (!pullRequestNumber) {
+              core.notice(`No PR found for workflow run ${process.env.RUN_ID}`)
+              return
+            }
+            return pullRequestNumber
+
+      - name: Committer check
+        id: committer_check
+        if: steps.pr.outputs.result != ''
+        uses: Tai-Min/Hardware-Actions/.github/actions/committer_check@master
+        with:
+          repo: ${{ github.repository }}
+          pr_number: ${{ steps.pr.outputs.result }}
+          repo_token: ${{ secrets.github_token }}
+
+      - name: Delete previous comment
+        if: steps.pr.outputs.result != '' && steps.committer_check.outputs.association == 'false'
+        uses: Tai-Min/Hardware-Actions/.github/actions/comment_remover@master
+        with:
+          pr_number: ${{ steps.pr.outputs.result }}
+          repo_token: ${{ secrets.github_token }}
+          magic_header: ${{ inputs.magic_header }}
+
+      - name: Post a comment
+        if: steps.pr.outputs.result != '' && steps.committer_check.outputs.association == 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.github_token }}
+          RUN_ID: ${{ inputs.run_id }}
+          PR_NUMBER: ${{ steps.pr.outputs.result }}
+          MSG_ARTIFACT_NAME: ${{ inputs.artifact_name }}
+
+        run: |
+          export GITHUB_API="https://api.github.com/repos/$GITHUB_REPOSITORY"
+
+          crl() {
+            curl --silent --show-error --location --retry 1 "${@:2}" \
+              -H "Accept: application/vnd.github.antiope-preview+json, application/vnd.github.v3+json" \
+             "$1"
+          }
+
+          auth_crl() {
+            crl "$1" -H "authorization: Bearer $GITHUB_TOKEN" "${@:2}"
+          }
+
+          ARTIFACTS="$(crl "$GITHUB_API/actions/runs/$RUN_ID/artifacts")"
+
+          ARTIFACT_URL="$(jq -r --arg MSG_ARTIFACT_NAME "$MSG_ARTIFACT_NAME" '
+            .artifacts
+            | map(select(.name == $MSG_ARTIFACT_NAME and .expired == false))
+            | first
+            | .archive_download_url
+            | select(.!=null)
+            ' <( echo "$ARTIFACTS" ) )"
+
+          if [ -z "$ARTIFACT_URL" ]; then
+            echo "Unable to find an artifact named '$MSG_ARTIFACT_NAME' in workflow $RUN_ID (PR #$PR_NUMBER), skipping..."
+            exit 0
+          fi
+
+          if ! MESSAGE="$(auth_crl "$ARTIFACT_URL" | gunzip)"; then
+            echo "Unable to download or parse message from artifact '$MSG_ARTIFACT_NAME' in workflow $RUN_ID (PR #$PR_NUMBER), skipping..."
+            exit 0
+          fi
+          if [ -z "$MESSAGE" ]; then
+            echo "Empty message in artifact '$MSG_ARTIFACT_NAME' in workflow $RUN_ID (PR #$PR_NUMBER), skipping..."
+            exit 0
+          fi
+
+          MESSAGE_BODY="$(jq -n \
+            --arg MESSAGE "$MESSAGE" \
+            '{ body: (($MESSAGE | sub( "^[\\s\\p{Cc}]+"; "" ) | sub( "[\\s\\p{Cc}]+$"; "" ))) }' \
+          )"
+
+          auth_crl "$GITHUB_API/issues/$PR_NUMBER/comments" \
+                -X POST \
+                -H "Content-Type: application/json" \
+                --data "$MESSAGE_BODY"

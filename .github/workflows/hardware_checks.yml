@@ -211,6 +211,7 @@ jobs:
             mkdir -p "./drc/$(dirname "$FILE")"
             OUT=$(kicad-cli pcb drc "$FILE" --output "./drc/$FILE.rpt" --schematic-parity)
             OUT=$(echo "$OUT" | head -n 3)
+            COPPER_LAYER_COUNT=$(python3 -c 'import pcbnew, sys; print(pcbnew.LoadBoard(sys.argv[1]).GetCopperLayerCount())' "$FILE")
 
             REPORT=""
             if [[ "$COMMITTER_ASSOCIATION" == 'true' ]]; then
@@ -229,6 +230,12 @@ jobs:
             mv "$PCB_DIR/plots" "./pcb/$PCB_DIR/"
 
             for SVG in "./pcb/$PCB_DIR"/plots/*.svg; do
+              SVG_NAME="$(basename "$SVG")"
+              if (( COPPER_LAYER_COUNT < 4 )) && [[ "$SVG_NAME" =~ _General_In[0-9]+Cu\.svg$ ]]; then
+                rm "$SVG"
+                continue
+              fi
+
               # Add white background
               sed -i '0,/<\/defs>/{s/<\/defs>/<\/defs><rect width="100%" height="100%" fill="white"\/>/}' "$SVG"
 

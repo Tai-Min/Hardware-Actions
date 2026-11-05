@@ -195,6 +195,34 @@ jobs:
     uses: Tai-Min/Hardware-Actions/.github/workflows/pr_alerts.yml@master
 ```
 
+### pr_commenter
+
+Post or replace a PR comment using the `pr_message` artifact from a workflow run. The workflow finds the associated PR from the run's head SHA. The caller must grant `actions: read` and `pull-requests: write` permissions and pass a token with those permissions.
+
+Example usage:
+
+```yaml
+name: Update PR comments
+
+on:
+  workflow_run:
+    workflows: [ CI ]
+    types: [ completed ]
+
+jobs:
+  pr_commenter:
+    permissions:
+      actions: read
+      pull-requests: write
+    uses: Tai-Min/Hardware-Actions/.github/workflows/pr_commenter.yml@master
+    with:
+      run_id: ${{ github.event.workflow_run.id }}
+    secrets:
+      github_token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Optional inputs `artifact_name` (default `pr_message`) and `magic_header` (default `<!-- TEST_RUNNER -->`) customize the artifact and the marker used to replace an earlier comment.
+
 ### pr_labeler
 
 Label PR using this repo's labeler.yml logic.
