@@ -19,16 +19,24 @@ on:
 jobs:
   check_author:
     runs-on: ubuntu-latest
-    if: >
-      inputs.is_pull_request == false &&
-      (inputs.comment_body == '/release' || startsWith(inputs.comment_body, '/release '))
+    if: inputs.is_pull_request == false
     permissions:
       issues: read
     outputs:
       association: ${{ steps.author_check.outputs.association }}
     steps:
+      - name: Check release command
+        id: command_check
+        env:
+          COMMENT_BODY: ${{ inputs.comment_body }}
+        run: |
+          if [[ "$COMMENT_BODY" =~ ^/release($|[[:space:]]) ]]; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Get author of the comment
         id: author_check
+        if: steps.command_check.outputs.valid == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
