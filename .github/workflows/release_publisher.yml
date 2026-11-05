@@ -18,7 +18,7 @@ on:
 
 jobs:
   check_author:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     if: >
       inputs.is_pull_request == false &&
       (inputs.comment_body == '/release' || startsWith(inputs.comment_body, '/release '))
@@ -37,7 +37,7 @@ jobs:
 
   release_publisher:
     if: needs.check_author.outputs.association == '"OWNER"' || needs.check_author.outputs.association == '"COLLABORATOR"'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     needs: check_author
     permissions:
       actions: read
